@@ -40,6 +40,19 @@ const normalizeCells = (cells) => {
   }, {});
 };
 
+const normalizeRow = (row = {}) => {
+  const normalized = {
+    date: String(row?.date ?? "").trim(),
+    cells: normalizeCells(row?.cells),
+  };
+
+  if (row?._id && mongoose.Types.ObjectId.isValid(row._id)) {
+    normalized._id = row._id;
+  }
+
+  return normalized;
+};
+
 let memoryDailyLog = { ...DEFAULT_DATA, rows: DEFAULT_DATA.rows.map((row) => ({ ...row, cells: { ...row.cells } })) };
 
 const cloneDailyLog = (data) => ({
@@ -47,22 +60,14 @@ const cloneDailyLog = (data) => ({
   intervalMinutes: data.intervalMinutes,
   startTime: data.startTime,
   endTime: data.endTime,
-  rows: (data.rows ?? []).map((row) => ({
-    date: String(row?.date ?? ""),
-    cells: normalizeCells(row?.cells),
-  })),
+  rows: (data.rows ?? []).map((row) => normalizeRow(row)),
 });
 
 const isDatabaseReady = () => mongoose.connection.readyState === 1;
 
 const sanitizePayload = (payload = {}) => {
   const intervalMinutes = Number(payload.intervalMinutes);
-  const normalizedRows = Array.isArray(payload.rows)
-    ? payload.rows.map((row) => ({
-        date: String(row?.date ?? "").trim(),
-        cells: normalizeCells(row?.cells),
-      }))
-    : [];
+  const normalizedRows = Array.isArray(payload.rows) ? payload.rows.map((row) => normalizeRow(row)) : [];
 
   return {
     key: "default",
@@ -117,6 +122,83 @@ export const saveDailyLog = async (req, res, next) => {
     ).lean();
 
     res.status(200).json({ message: "Daily Log saved successfully", data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const findDeleteIndex = (rows = [], { rowId, rowIndex, date }) => {
+  if (rowId) {
+    const byId = rows.findIndex((row) => String(row?._id ?? "") === String(rowId));
+    if (byId >= 0) {
+      return byId;
+    }
+  }
+
+  const indexValue = Number(rowIndex);
+  if (Number.isInteger(indexValue) && indexValue >= 0 && indexValue < rows.length) {
+    return indexValue;
+  }
+
+  if (date) {
+    const byDate = rows.findIndex((row) => String(row?.date ?? "") === String(date));
+    if (byDate >= 0) {
+      return byDate;
+    }
+  }
+
+  return -1;
+};
+
+export const deleteDailyLogRow = async (req, res, next) => {
+  try {
+    const { rowId, rowIndex, date } = req.body ?? {};
+
+    if (!isDatabaseReady()) {
+      const memoryRows = [...(memoryDailyLog.rows ?? [])];
+      const deleteIndex = findDeleteIndex(memoryRows, { rowId, rowIndex, date });
+
+      if (deleteIndex < 0) {
+        res.status(404).json({ message: "Row not found" });
+        return;
+      }
+
+      memoryRows.splice(deleteIndex, 1);
+      memoryDailyLog = {
+        ...memoryDailyLog,
+        rows: memoryRows,
+      };
+
+      res.status(200).json({
+        message: "Row deleted in memory mode",
+        data: cloneDailyLog(memoryDailyLog),
+      });
+      return;
+    }
+
+    const doc = await DailyLog.findOne({ key: "default" });
+
+    if (!doc) {
+      res.status(404).json({ message: "Daily Log not found" });
+      return;
+    }
+
+    const rows = doc.rows ?? [];
+    const deleteIndex = findDeleteIndex(rows, { rowId, rowIndex, date });
+
+    if (deleteIndex < 0) {
+      res.status(404).json({ message: "Row not found" });
+      return;
+    }
+
+    rows.splice(deleteIndex, 1);
+    doc.rows = rows;
+    await doc.save();
+
+    res.status(200).json({
+      message: "Row deleted successfully",
+      data: doc.toObject(),
+    });
   } catch (error) {
     next(error);
   }

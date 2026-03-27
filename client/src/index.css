@@ -1,27 +1,33 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --paper: #fffef9;
-  --ink: #102030;
-  --accent: #f25f5c;
-  --mist: #e8eef3;
+  --bg-top: #f5f9ff;
+  --bg-bottom: #e7efff;
+  --ink: #0f1c2e;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  font-family: "Plus Jakarta Sans", "Trebuchet MS", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at 10% 20%, rgba(255, 213, 128, 0.32), transparent 35%),
-    radial-gradient(circle at 85% 0%, rgba(125, 200, 255, 0.3), transparent 40%),
-    linear-gradient(160deg, #f8fbff 0%, #fefbf4 100%);
+    radial-gradient(circle at 12% 15%, rgba(123, 180, 255, 0.35), transparent 32%),
+    radial-gradient(circle at 90% 8%, rgba(105, 169, 255, 0.28), transparent 30%),
+    radial-gradient(circle at 50% 100%, rgba(153, 235, 255, 0.35), transparent 40%),
+    linear-gradient(155deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
 }
 
 input,
 button,
 select {
   font: inherit;
+}
+
+#root {
+  min-height: 100vh;
 }
