@@ -7,8 +7,8 @@ const DEFAULT_DATA = {
   startTime: "08:00",
   endTime: "10:00",
   rows: [
-    { date: "2026/3/27", cells: {} },
-    { date: "2026/3/28", cells: {} },
+    { date: "2026/3/27", units: Array.from({ length: 15 }, () => false) },
+    { date: "2026/3/28", units: Array.from({ length: 15 }, () => false) },
   ],
 };
 
@@ -29,21 +29,29 @@ const toBoolean = (value) => {
   return false;
 };
 
-const normalizeCells = (cells) => {
-  if (!cells || typeof cells !== "object") {
-    return {};
-  }
-
-  return Object.entries(cells).reduce((accumulator, [slot, value]) => {
-    accumulator[slot] = toBoolean(value);
-    return accumulator;
-  }, {});
+const normalizeUnits = (units, fallbackCount = 15) => {
+  const safeCount = Number.isFinite(fallbackCount) && fallbackCount > 0 ? Math.floor(fallbackCount) : 15;
+  return Array.from({ length: safeCount }, (_value, index) => toBoolean(units?.[index]));
 };
 
-const normalizeRow = (row = {}) => {
+const normalizeRow = (row = {}, intervalMinutes = 15) => {
+  const unitsPerSlot = Math.max(1, Math.floor(Number(intervalMinutes) / 15));
+  const fallbackCountFromCells = row?.cells && typeof row.cells === "object" ? Object.keys(row.cells).length * unitsPerSlot : 15;
+
+  let normalizedUnits = [];
+  if (Array.isArray(row?.units)) {
+    normalizedUnits = normalizeUnits(row.units, row.units.length || fallbackCountFromCells);
+  } else if (row?.cells && typeof row.cells === "object") {
+    const legacyValues = Object.values(row.cells).map((value) => toBoolean(value));
+    const expandedLegacyUnits = legacyValues.flatMap((value) => Array.from({ length: unitsPerSlot }, () => value));
+    normalizedUnits = normalizeUnits(expandedLegacyUnits, expandedLegacyUnits.length || fallbackCountFromCells);
+  } else {
+    normalizedUnits = normalizeUnits([], fallbackCountFromCells);
+  }
+
   const normalized = {
     date: String(row?.date ?? "").trim(),
-    cells: normalizeCells(row?.cells),
+    units: normalizedUnits,
   };
 
   if (row?._id && mongoose.Types.ObjectId.isValid(row._id)) {
@@ -53,25 +61,37 @@ const normalizeRow = (row = {}) => {
   return normalized;
 };
 
-let memoryDailyLog = { ...DEFAULT_DATA, rows: DEFAULT_DATA.rows.map((row) => ({ ...row, cells: { ...row.cells } })) };
+let memoryDailyLog = {
+  ...DEFAULT_DATA,
+  rows: DEFAULT_DATA.rows.map((row) => ({ ...row, units: Array.isArray(row.units) ? [...row.units] : [] })),
+};
+memoryDailyLog = {
+  ...memoryDailyLog,
+  rows: (memoryDailyLog.rows ?? []).map((row) => normalizeRow(row, memoryDailyLog.intervalMinutes)),
+};
 
 const cloneDailyLog = (data) => ({
   key: "default",
   intervalMinutes: data.intervalMinutes,
   startTime: data.startTime,
   endTime: data.endTime,
-  rows: (data.rows ?? []).map((row) => normalizeRow(row)),
+  rows: (data.rows ?? []).map((row) => normalizeRow(row, data.intervalMinutes)),
 });
 
-const isDatabaseReady = () => mongoose.connection.readyState === 1;
+// Legacy dashboard routes use a different shape than the new per-user DailyLog schema.
+// Keep these endpoints in memory mode for backward compatibility with the current frontend.
+const isDatabaseReady = () => false;
 
 const sanitizePayload = (payload = {}) => {
   const intervalMinutes = Number(payload.intervalMinutes);
-  const normalizedRows = Array.isArray(payload.rows) ? payload.rows.map((row) => normalizeRow(row)) : [];
+  const safeInterval = Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : 15;
+  const normalizedRows = Array.isArray(payload.rows)
+    ? payload.rows.map((row) => normalizeRow(row, safeInterval))
+    : [];
 
   return {
     key: "default",
-    intervalMinutes: Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : 15,
+    intervalMinutes: safeInterval,
     startTime: String(payload.startTime ?? "08:00"),
     endTime: String(payload.endTime ?? "10:00"),
     rows: normalizedRows,

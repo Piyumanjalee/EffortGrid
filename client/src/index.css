@@ -1,25 +1,27 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg-top: #f5f9ff;
-  --bg-bottom: #e7efff;
-  --ink: #0f1c2e;
+  --bg-main: #eff6ff;
+  --bg-elevated: #ffffff;
+  --ink: #1e293b;
+  --muted: #64748b;
+  --border: #dbe3ef;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Plus Jakarta Sans", "Trebuchet MS", sans-serif;
+  font-family: "Manrope", "Segoe UI", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at 12% 15%, rgba(123, 180, 255, 0.35), transparent 32%),
-    radial-gradient(circle at 90% 8%, rgba(105, 169, 255, 0.28), transparent 30%),
-    radial-gradient(circle at 50% 100%, rgba(153, 235, 255, 0.35), transparent 40%),
-    linear-gradient(155deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+    linear-gradient(180deg, rgba(37, 99, 235, 0.08) 0%, rgba(129, 140, 248, 0.03) 38%, rgba(255, 255, 255, 0) 70%),
+    var(--bg-main);
 }
 
 input,
@@ -30,4 +32,8 @@ select {
 
 #root {
   min-height: 100vh;
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.2);
 }

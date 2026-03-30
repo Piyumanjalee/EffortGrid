@@ -1,50 +1,34 @@
 import mongoose from "mongoose";
 
-const rowSchema = new mongoose.Schema(
-  {
-    date: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    cells: {
-      type: Map,
-      of: Boolean,
-      default: {},
-    },
-  },
-  { _id: true }
-);
-
 const dailyLogSchema = new mongoose.Schema(
   {
-    key: {
-      type: String,
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
-      unique: true,
-      default: "default",
     },
-    intervalMinutes: {
+    date: {
+      type: Date,
+      required: true,
+    },
+    slots: {
+      type: [Boolean],
+      default: [],
+    },
+    interval: {
       type: Number,
       required: true,
       default: 15,
     },
-    startTime: {
-      type: String,
+    slotCount: {
+      type: Number,
       required: true,
-      default: "08:00",
-    },
-    endTime: {
-      type: String,
-      required: true,
-      default: "10:00",
-    },
-    rows: {
-      type: [rowSchema],
-      default: [],
+      default: 15,
     },
   },
   { timestamps: true }
 );
+
+dailyLogSchema.index({ user: 1, date: 1 }, { unique: true });
 
 export default mongoose.model("DailyLog", dailyLogSchema);

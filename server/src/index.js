@@ -4,7 +4,9 @@ import express from "express";
 import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from "url";
+import authRoutes from "./routes/authRoutes.js";
 import dailyLogRoutes from "./routes/dailyLogRoutes.js";
+import logRoutes from "./routes/logRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,16 +15,18 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI;
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000")
+const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI;
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const isLocalDevOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || CORS_ORIGINS.includes(origin)) {
+      if (!origin || CORS_ORIGINS.includes(origin) || isLocalDevOrigin(origin)) {
         callback(null, true);
         return;
       }
@@ -38,11 +42,17 @@ app.get("/api/health", (_req, res) => {
   res.status(200).json({
     ok: true,
     dbReady,
-    storageMode: dbReady ? "mongodb" : "memory",
+    mode: dbReady ? "mongodb" : "disconnected",
   });
 });
 
+app.use("/api/auth", authRoutes);
+app.use("/api/logs", logRoutes);
 app.use("/api", dailyLogRoutes);
+
+app.use((req, res) => {
+  res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
+});
 
 app.use((err, _req, res, _next) => {
   const status = err?.status || 500;
@@ -52,13 +62,14 @@ app.use((err, _req, res, _next) => {
 });
 
 const startServer = async () => {
-  if (!MONGODB_URI) {
-    throw new Error("MONGODB_URI is missing. Add it to server/.env");
+  if (!MONGO_URI) {
+    throw new Error("MONGO_URI is missing. Add it to server/.env");
   }
 
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = "dev-jwt-secret";
+    console.warn("JWT_SECRET is missing. Using temporary development secret.");
+  }
 
   let isConnecting = false;
 
@@ -69,7 +80,7 @@ const startServer = async () => {
 
     try {
       isConnecting = true;
-      await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+      await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
       console.log("MongoDB connected");
     } catch (error) {
       console.error(`MongoDB connection failed: ${error.message}. Retrying in 5 seconds...`);
@@ -80,6 +91,10 @@ const startServer = async () => {
   };
 
   connectWithRetry();
+
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 };
 
 startServer().catch((error) => {
