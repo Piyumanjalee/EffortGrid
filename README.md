@@ -110,12 +110,36 @@ Protected logs:
 
 ## Key Features
 
-- Glassmorphism-based responsive UI
-- Home, Time Tracking, and Todo views
-- Slot interval grouping based on 15-minute base units
-- Timer mode and manual tick support
-- Auto-save behavior with subtle saved indicator
-- Daily effort trend chart
+- **Glassmorphism UI**: Premium glass-morphic design with `bg-white/80`, `backdrop-blur-xl` throughout
+- **Home, Time Tracking, and Todo Views**: Multi-view dashboard with tab navigation
+- **Slot Interval Grouping**: Based on 15-minute base units (15, 30, 45, 60 min intervals)
+- **Timer Controls**: Start, pause, resume, and cancel timers with intuitive UI
+  - **Cancel Timer Modal**: Clean confirmation dialog (replaces `window.confirm`) with orange-themed design
+  - **Timer Completion Notifications**: Audio alert (CDN-hosted) + success toast + visual slot flash
+- **Manual Tick Support**: Manually check slots without using timer
+- **Auto-save**: Debounced saves (700ms) with subtle saved indicator
+- **Daily Effort Trend Chart**: Visual growth tracking with Recharts
+- **Responsive Design**: Mobile-friendly layout with Tailwind CSS
+
+## Timer & Notifications
+
+### Timer Controls
+- **Start Timer**: Begin tracking effort for a slot
+- **Pause/Resume**: Temporarily halt timer without losing progress
+- **Cancel Timer**: Stop and reset slot with confirmation modal
+- **Auto-Complete**: Automatically checks slot when timer reaches 0:00
+
+### Cancel Timer Modal
+When you click on an active timer or the cancel button (×), a custom glassmorphic confirmation modal appears:
+- **Design**: Matches premium UI with orange-themed TimerOff icon
+- **Buttons**: "Keep Running" (cancel) and "Stop Timer" (confirm) with clear intent
+- **Backdrop**: Click outside to dismiss without action
+
+### Timer Completion Feedback
+When a timer finishes:
+1. **Audio Notification**: Plays CDN-hosted completion sound (volume: 0.5)
+2. **Success Toast**: "Success: timer finished" message (auto-dismisses after 1.8s)
+3. **Visual Flash**: Slot background flashes emerald green (1.2s duration)
 
 ## Troubleshooting
 
