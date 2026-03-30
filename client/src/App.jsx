@@ -42,11 +42,11 @@ function ProtectedRoute({ isAuthenticated, children }) {
 function AuthShell({ children, authMessage, authError }) {
   return (
     <section className="relative z-10 mx-auto mt-8 grid w-full max-w-6xl items-start gap-6 px-4 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
-      <div className="rounded-2xl border border-white/20 bg-white/70 p-7 shadow-xl backdrop-blur-md sm:p-10">
+      <div className="rounded-2xl border border-white/30 bg-white/80 p-7 shadow-xl backdrop-blur-xl sm:p-10">
         <p className="inline-flex rounded-md bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">
           Team Time Tracker
         </p>
-        <h1 className="mt-5 text-4xl font-semibold leading-tight text-slate-800 sm:text-5xl">
+        <h1 className="mt-5 text-4xl font-semibold leading-tight text-slate-900 sm:text-5xl">
           Track time with clarity.
           <br />
           Stay focused every day.
@@ -56,12 +56,12 @@ function AuthShell({ children, authMessage, authError }) {
         </p>
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-white/20 bg-white/60 p-4 backdrop-blur-sm">
-            <p className="text-sm font-semibold text-slate-800">Live Auto Save</p>
+          <div className="rounded-lg border border-white/30 bg-white/80 p-4 backdrop-blur-xl">
+            <p className="text-sm font-semibold text-slate-900">Live Auto Save</p>
             <p className="mt-1 text-sm text-slate-600">Changes sync automatically as you check progress slots.</p>
           </div>
-          <div className="rounded-lg border border-white/20 bg-white/60 p-4 backdrop-blur-sm">
-            <p className="text-sm font-semibold text-slate-800">Structured Daily Grid</p>
+          <div className="rounded-lg border border-white/30 bg-white/80 p-4 backdrop-blur-xl">
+            <p className="text-sm font-semibold text-slate-900">Structured Daily Grid</p>
             <p className="mt-1 text-sm text-slate-600">Visual time slots help your team stay aligned on effort.</p>
           </div>
         </div>
@@ -161,8 +161,8 @@ function App() {
   };
 
   return (
-    <main className="relative flex min-h-screen flex-col bg-gradient-to-br from-blue-50 via-white to-indigo-100">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-blue-100/70 to-transparent" />
+    <main className="relative flex min-h-screen flex-col bg-premium-gradient">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-white/45 to-transparent" />
 
       <Header
         isAuthenticated={isAuthenticated}

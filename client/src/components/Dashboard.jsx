@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Check, TriangleAlert } from "lucide-react";
+import { Check, TriangleAlert, TimerOff } from "lucide-react";
 import { deleteDailyLogRow, getBackendHealth, getDailyLog, saveDailyLog } from "../api";
 
 const BASE_UNIT_MINUTES = 15;
@@ -8,6 +8,7 @@ const DEFAULT_SLOT_INTERVAL = 15;
 const DEFAULT_SLOT_COUNT = 15;
 const ALLOWED_INTERVALS = [15, 30, 45, 60];
 const TODO_STORAGE_KEY = "effortgrid-todo-items";
+const NOTIFICATION_SOUND_URL = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
 const readTodoItems = () => {
   try {
@@ -270,12 +271,19 @@ function Dashboard() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [isDeletingRow, setIsDeletingRow] = useState(false);
+  const [showCancelTimerModal, setShowCancelTimerModal] = useState(false);
+  const [cancelTimerSlotData, setCancelTimerSlotData] = useState(null);
   const [showSavedIndicator, setShowSavedIndicator] = useState(false);
+  const [completionToast, setCompletionToast] = useState("");
+  const [completedSlotFlashes, setCompletedSlotFlashes] = useState({});
   const [todoInput, setTodoInput] = useState("");
   const [todoItems, setTodoItems] = useState(() => readTodoItems());
   const timerIntervalRef = useRef(null);
   const autoSaveTimeoutRef = useRef(null);
   const savedIndicatorTimeoutRef = useRef(null);
+  const completionToastTimeoutRef = useRef(null);
+  const completionFlashTimeoutsRef = useRef(new Map());
+  const notificationAudioRef = useRef(null);
   const hasWarnedMemoryModeRef = useRef(false);
   const hasLoadedDataRef = useRef(false);
 
@@ -333,27 +341,76 @@ function Dashboard() {
     return `${minutes}:${String(seconds).padStart(2, "0")}`;
   };
 
-  // Helper function to play notification sound
-  const playNotificationSound = () => {
+  // Play one short notification without overlapping previous playback.
+  const playNotification = () => {
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
+      if (!notificationAudioRef.current) {
+        notificationAudioRef.current = new Audio(NOTIFICATION_SOUND_URL);
+        notificationAudioRef.current.preload = "auto";
+      }
 
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+      const audio = notificationAudioRef.current;
+      audio.pause();
+      audio.currentTime = 0;
+      audio.volume = 0.5;
 
-      oscillator.frequency.value = 800;
-      oscillator.type = "sine";
-
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.5);
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch((playError) => {
+          console.warn("Notification sound blocked:", playError);
+        });
+      }
     } catch (err) {
       console.warn("Notification sound failed:", err);
     }
+  };
+
+  const triggerCompletionFeedback = (completedTimerKeys) => {
+    if (!Array.isArray(completedTimerKeys) || completedTimerKeys.length === 0) {
+      return;
+    }
+
+    playNotification();
+
+    setCompletionToast("Success: timer finished");
+    if (completionToastTimeoutRef.current) {
+      clearTimeout(completionToastTimeoutRef.current);
+    }
+
+    completionToastTimeoutRef.current = setTimeout(() => {
+      setCompletionToast("");
+      completionToastTimeoutRef.current = null;
+    }, 1800);
+
+    setCompletedSlotFlashes((previous) => {
+      const next = { ...previous };
+      completedTimerKeys.forEach((key) => {
+        next[key] = true;
+      });
+      return next;
+    });
+
+    completedTimerKeys.forEach((key) => {
+      const activeTimeout = completionFlashTimeoutsRef.current.get(key);
+      if (activeTimeout) {
+        clearTimeout(activeTimeout);
+      }
+
+      const timeoutId = setTimeout(() => {
+        setCompletedSlotFlashes((previous) => {
+          if (!previous[key]) {
+            return previous;
+          }
+
+          const next = { ...previous };
+          delete next[key];
+          return next;
+        });
+        completionFlashTimeoutsRef.current.delete(key);
+      }, 1200);
+
+      completionFlashTimeoutsRef.current.set(key, timeoutId);
+    });
   };
 
   const hasRunningTimers = (timers) =>
@@ -419,6 +476,7 @@ function Dashboard() {
       setActiveTimers((prevTimers) => {
         const updatedTimers = { ...prevTimers };
         const completedByRow = new Map();
+        const completedTimerKeys = [];
 
         Object.entries(updatedTimers).forEach(([key, timer]) => {
           if (!timer || timer.status !== "running") {
@@ -427,6 +485,8 @@ function Dashboard() {
 
           const nextRemaining = timer.remainingSeconds - 1;
           if (nextRemaining <= 0) {
+            completedTimerKeys.push(key);
+
             const [rowIndexStr, slotIndexStr] = key.split("-");
             const rowIndex = Number(rowIndexStr);
             const slotIndex = Number(slotIndexStr);
@@ -462,7 +522,7 @@ function Dashboard() {
             })
           );
 
-          playNotificationSound();
+          triggerCompletionFeedback(completedTimerKeys);
           setMessage("Timer completed! Slot auto-checked.");
         }
 
@@ -478,6 +538,16 @@ function Dashboard() {
       stopTimerInterval();
       if (savedIndicatorTimeoutRef.current) {
         clearTimeout(savedIndicatorTimeoutRef.current);
+      }
+      if (completionToastTimeoutRef.current) {
+        clearTimeout(completionToastTimeoutRef.current);
+      }
+      completionFlashTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+      completionFlashTimeoutsRef.current.clear();
+
+      if (notificationAudioRef.current) {
+        notificationAudioRef.current.pause();
+        notificationAudioRef.current.currentTime = 0;
       }
     },
     []
@@ -573,12 +643,8 @@ function Dashboard() {
     const timer = activeTimers[timerKey];
 
     if (timer) {
-      const shouldCancel = window.confirm("A timer is active for this slot. Cancel the timer and reset this slot?");
-      if (shouldCancel) {
-        handleCancelTimer(rowIndex, slotIndex);
-      } else {
-        setMessage("Timer is still active. Use Cancel to reset this slot.");
-      }
+      setCancelTimerSlotData({ rowIndex, slotIndex });
+      setShowCancelTimerModal(true);
       return;
     }
 
@@ -744,7 +810,23 @@ function Dashboard() {
 
   const handleDeleteRow = async () => {
     if (!itemToDelete) {
+    
+
+  const closeCancelTimerModal = () => {
+    setShowCancelTimerModal(false);
+    setCancelTimerSlotData(null);
+  };
+
+  const handleConfirmCancelTimer = () => {
+    if (!cancelTimerSlotData) {
       return;
+    }
+
+    const { rowIndex, slotIndex } = cancelTimerSlotData;
+    handleCancelTimer(rowIndex, slotIndex);
+    closeCancelTimerModal();
+    setMessage("Timer has been stopped and slot reset.");
+  };  return;
     }
 
     const { row, rowIndex } = itemToDelete;
@@ -868,16 +950,23 @@ function Dashboard() {
 
   return (
     <section className="relative z-10 mx-auto mt-6 w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-      <div className="mb-5 rounded-2xl border border-white/20 bg-white/70 p-3 shadow-xl backdrop-blur-md">
+      {completionToast ? (
+        <div className="fixed bottom-6 right-6 z-50 inline-flex items-center gap-2 rounded-lg border border-white/30 bg-white/85 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-xl backdrop-blur-xl">
+          <Check size={14} />
+          {completionToast}
+        </div>
+      ) : null}
+
+      <div className="mb-5 rounded-2xl border border-white/30 bg-white/80 p-3 shadow-xl backdrop-blur-xl">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold text-slate-800 sm:text-2xl">Dashboard Workspace</h1>
+          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Dashboard Workspace</h1>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setActiveView("home")}
               className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
                 activeView === "home"
-                  ? "bg-blue-600 text-white"
+                  ? "bg-sky-500 text-white"
                   : "border border-white/30 bg-white/60 text-slate-700 hover:bg-white"
               }`}
             >
@@ -888,7 +977,7 @@ function Dashboard() {
               onClick={() => setActiveView("time")}
               className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
                 activeView === "time"
-                  ? "bg-blue-600 text-white"
+                  ? "bg-sky-500 text-white"
                   : "border border-white/30 bg-white/60 text-slate-700 hover:bg-white"
               }`}
             >
@@ -899,7 +988,7 @@ function Dashboard() {
               onClick={() => setActiveView("todo")}
               className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
                 activeView === "todo"
-                  ? "bg-blue-600 text-white"
+                  ? "bg-sky-500 text-white"
                   : "border border-white/30 bg-white/60 text-slate-700 hover:bg-white"
               }`}
             >
@@ -914,21 +1003,21 @@ function Dashboard() {
           <button
             type="button"
             onClick={() => setActiveView("time")}
-            className="group min-h-[220px] rounded-2xl border border-white/20 bg-white/70 p-8 text-left shadow-xl backdrop-blur-md transition hover:-translate-y-1 hover:bg-white/80"
+            className="group min-h-[220px] rounded-2xl border border-white/30 bg-white/80 p-8 text-left shadow-xl backdrop-blur-xl transition hover:-translate-y-1 hover:bg-white/90"
           >
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">Productivity</p>
-            <h2 className="mt-3 text-3xl font-semibold text-slate-800">Time Tracking</h2>
+            <h2 className="mt-3 text-3xl font-semibold text-slate-900">Time Tracking</h2>
             <p className="mt-3 max-w-sm text-sm text-slate-600">
               Track daily slots, start timers, and monitor effort trends with your activity chart.
             </p>
-            <div className="mt-6 space-y-2 rounded-lg border border-white/20 bg-white/60 p-3 text-sm">
+            <div className="mt-6 space-y-2 rounded-lg border border-white/30 bg-white/80 p-3 text-sm backdrop-blur-xl">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-600">Total Time Today:</span>
                 <span className="font-semibold text-blue-700">{formatMinutesSummary(totalMinutesToday)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-600">Active Days:</span>
-                <span className="font-semibold text-slate-800">{activeDaysCount} days</span>
+                <span className="font-semibold text-slate-900">{activeDaysCount} days</span>
               </div>
             </div>
             <p className="mt-6 text-sm font-semibold text-blue-700 group-hover:text-blue-800">Open Time Tracking</p>
@@ -937,17 +1026,17 @@ function Dashboard() {
           <button
             type="button"
             onClick={() => setActiveView("todo")}
-            className="group min-h-[220px] rounded-2xl border border-white/20 bg-white/70 p-8 text-left shadow-xl backdrop-blur-md transition hover:-translate-y-1 hover:bg-white/80"
+            className="group min-h-[220px] rounded-2xl border border-white/30 bg-white/80 p-8 text-left shadow-xl backdrop-blur-xl transition hover:-translate-y-1 hover:bg-white/90"
           >
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">Planning</p>
-            <h2 className="mt-3 text-3xl font-semibold text-slate-800">Todo List</h2>
+            <h2 className="mt-3 text-3xl font-semibold text-slate-900">Todo List</h2>
             <p className="mt-3 max-w-sm text-sm text-slate-600">
               Capture quick tasks, mark completion, and keep your focus list ready for the day.
             </p>
-            <div className="mt-6 space-y-2 rounded-lg border border-white/20 bg-white/60 p-3 text-sm">
+            <div className="mt-6 space-y-2 rounded-lg border border-white/30 bg-white/80 p-3 text-sm backdrop-blur-xl">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-600">Total Tasks:</span>
-                <span className="font-semibold text-slate-800">{todoItems.length}</span>
+                <span className="font-semibold text-slate-900">{todoItems.length}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-600">Completed:</span>
@@ -960,9 +1049,9 @@ function Dashboard() {
       ) : null}
 
       {activeView === "time" ? (
-        <div className="rounded-2xl border border-white/20 bg-white/70 p-4 shadow-xl backdrop-blur-md sm:p-6">
+        <div className="rounded-2xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl sm:p-6">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-            <h2 className="text-2xl font-semibold text-slate-800 sm:text-3xl">Time Tracking</h2>
+            <h2 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Time Tracking</h2>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
                 {isSaving ? "Autosaving..." : "Auto Save On"}
@@ -976,7 +1065,7 @@ function Dashboard() {
               <button
                 type="button"
                 onClick={openSlotEditor}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+                className="rounded-md bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
               >
                 Change Slots
               </button>
@@ -985,7 +1074,7 @@ function Dashboard() {
 
           {error ? <p className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
 
-          <div className="overflow-x-auto rounded-xl border border-white/20 bg-white/60 backdrop-blur-sm">
+          <div className="overflow-x-auto rounded-xl border border-white/30 bg-white/80 backdrop-blur-xl">
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-blue-50/70 text-slate-700">
                 <tr>
@@ -995,7 +1084,7 @@ function Dashboard() {
                       {range.label}
                     </th>
                   ))}
-                  <th className="whitespace-nowrap border border-slate-200 bg-slate-100 px-3 py-3 text-center font-bold text-slate-800">
+                  <th className="whitespace-nowrap border border-slate-200 bg-slate-100 px-3 py-3 text-center font-bold text-slate-900">
                     Total Effort
                   </th>
                   <th className="border border-slate-200 px-3 py-3 text-center font-bold">Add</th>
@@ -1012,7 +1101,7 @@ function Dashboard() {
                         type="date"
                         value={toDateInputValue(row.date)}
                         onChange={(event) => handleDateChange(rowIndex, event.target.value)}
-                        className="w-44 rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                        className="w-44 rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-600 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                         aria-label={`date-${rowIndex}`}
                       />
                     </td>
@@ -1029,9 +1118,16 @@ function Dashboard() {
                       const isSlotChecked = groupState === "full";
                       const isSlotPartial = groupState === "partial";
                       const isNextAvailableSlot = groupState !== "full" && slotIndex === nextAvailableSlot;
+                      const flashKey = `${rowIndex}-${slotIndex}`;
+                      const isCompletionFlash = Boolean(completedSlotFlashes[flashKey]);
 
                       return (
-                        <td key={`${rowIndex}-${range.slotIndex}`} className="relative border border-slate-200 px-2 py-2">
+                        <td
+                          key={`${rowIndex}-${range.slotIndex}`}
+                          className={`relative border border-slate-200 px-2 py-2 transition-colors duration-300 ${
+                            isCompletionFlash ? "bg-emerald-100/70" : ""
+                          }`}
+                        >
                           {isTimerActive ? (
                             <div className="flex items-center justify-center">
                               <div
@@ -1055,7 +1151,10 @@ function Dashboard() {
                                   {!isTimerPaused ? (
                                     <button
                                       type="button"
-                                      onClick={() => handlePauseTimer(rowIndex, slotIndex)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handlePauseTimer(rowIndex, slotIndex);
+                                      }}
                                       className="grid h-4 w-4 place-items-center rounded bg-white/85 text-[10px] font-black text-orange-700 shadow-sm transition hover:bg-white"
                                       title="Pause timer"
                                       aria-label={`pause-timer-${rowIndex}-${slotIndex}`}
@@ -1065,7 +1164,10 @@ function Dashboard() {
                                   ) : (
                                     <button
                                       type="button"
-                                      onClick={() => handleResumeTimer(rowIndex, slotIndex)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleResumeTimer(rowIndex, slotIndex);
+                                      }}
                                       className="grid h-4 w-4 place-items-center rounded bg-white/85 text-[10px] font-black text-blue-700 shadow-sm transition hover:bg-white"
                                       title="Resume timer"
                                       aria-label={`resume-timer-${rowIndex}-${slotIndex}`}
@@ -1075,7 +1177,10 @@ function Dashboard() {
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => handleCancelTimer(rowIndex, slotIndex)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCancelTimer(rowIndex, slotIndex);
+                                    }}
                                     className="grid h-4 w-4 place-items-center rounded bg-white/85 text-[10px] font-black text-rose-700 shadow-sm transition hover:bg-white"
                                     title="Cancel timer"
                                     aria-label={`cancel-timer-${rowIndex}-${slotIndex}`}
@@ -1119,7 +1224,7 @@ function Dashboard() {
 
                               {isPopoverOpen && (
                                 <div className="absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 transform">
-                                  <div className="rounded-md border border-white/20 bg-white/75 p-2 shadow-xl backdrop-blur-sm">
+                                  <div className="rounded-md border border-white/30 bg-white/80 p-2 shadow-xl backdrop-blur-xl">
                                     <button
                                       type="button"
                                       onClick={() => handleManualTick(rowIndex, slotIndex)}
@@ -1154,7 +1259,7 @@ function Dashboard() {
                       <button
                         type="button"
                         onClick={() => insertRowBelow(rowIndex)}
-                        className="rounded-md bg-blue-600 px-3 py-1 text-sm font-bold text-white transition hover:bg-blue-700"
+                        className="rounded-md bg-sky-500 px-3 py-1 text-sm font-bold text-white transition hover:bg-sky-600"
                       >
                         [+]
                       </button>
@@ -1164,7 +1269,7 @@ function Dashboard() {
                       <button
                         type="button"
                         onClick={() => requestRowDelete(row, rowIndex)}
-                        className="rounded-md bg-red-500 px-3 py-1 text-sm font-semibold text-white transition hover:bg-red-600"
+                        className="rounded-md bg-red-500/90 px-3 py-1 text-sm font-semibold text-white transition hover:bg-red-600/90"
                         aria-label={`delete-row-${rowIndex}`}
                         title="Delete row"
                       >
@@ -1177,9 +1282,9 @@ function Dashboard() {
             </table>
           </div>
 
-          <div className="mt-8 rounded-2xl border border-white/20 bg-white/70 p-4 shadow-xl backdrop-blur-md sm:p-6">
+          <div className="mt-8 rounded-2xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl sm:p-6">
             <div className="mb-4 flex items-center justify-between gap-2">
-              <h3 className="text-lg font-semibold text-slate-800 sm:text-xl">Growth Chart</h3>
+              <h3 className="text-lg font-semibold text-slate-900 sm:text-xl">Growth Chart</h3>
               <span className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
                 Daily Total Hours
               </span>
@@ -1223,9 +1328,9 @@ function Dashboard() {
       ) : null}
 
       {activeView === "todo" ? (
-        <div className="rounded-2xl border border-white/20 bg-white/70 p-5 shadow-xl backdrop-blur-md sm:p-6">
+        <div className="rounded-2xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-2xl font-semibold text-slate-800">Todo List</h2>
+            <h2 className="text-2xl font-semibold text-slate-900">Todo List</h2>
             <span className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
               {todoItems.filter((item) => !item.completed).length} Pending
             </span>
@@ -1243,12 +1348,12 @@ function Dashboard() {
                 }
               }}
               placeholder="Add a new task"
-              className="w-full rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="w-full rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-600 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
             <button
               type="button"
               onClick={handleAddTodo}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+              className="rounded-md bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
             >
               Add Task
             </button>
@@ -1261,7 +1366,7 @@ function Dashboard() {
               </p>
             ) : (
               todoItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-white/20 bg-white/65 px-3 py-2 backdrop-blur-sm">
+                <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-white/30 bg-white/80 px-3 py-2 backdrop-blur-xl">
                   <label className="flex items-center gap-3 text-sm text-slate-700">
                     <input
                       type="checkbox"
@@ -1269,12 +1374,12 @@ function Dashboard() {
                       onChange={() => handleToggleTodo(item.id)}
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <span className={item.completed ? "text-slate-400 line-through" : "text-slate-800"}>{item.title}</span>
+                    <span className={item.completed ? "text-slate-400 line-through" : "text-slate-600"}>{item.title}</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => handleDeleteTodo(item.id)}
-                    className="rounded-md bg-red-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-red-600"
+                    className="rounded-md bg-red-500/90 px-3 py-1 text-xs font-semibold text-white transition hover:bg-red-600/90"
                   >
                     Delete
                   </button>
@@ -1287,8 +1392,8 @@ function Dashboard() {
 
       {activeView === "time" && isSlotEditorOpen ? (
         <div className="fixed inset-0 z-30 grid place-items-center bg-slate-900/35 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/20 bg-white/70 p-5 shadow-xl backdrop-blur-md sm:p-6">
-            <h3 className="text-lg font-semibold text-slate-800">Change Slots</h3>
+          <div className="w-full max-w-md rounded-2xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl sm:p-6">
+            <h3 className="text-lg font-semibold text-slate-900">Change Slots</h3>
             <p className="mt-1 text-sm text-slate-600">Update interval and number of columns for the dashboard.</p>
 
             <div className="mt-5 space-y-4">
@@ -1297,7 +1402,7 @@ function Dashboard() {
                 <select
                   value={draftSlotInterval}
                   onChange={(event) => setDraftSlotInterval(event.target.value)}
-                  className="w-full rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-600 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 >
                   {ALLOWED_INTERVALS.map((interval) => (
                     <option key={interval} value={interval}>
@@ -1314,7 +1419,7 @@ function Dashboard() {
                   min="1"
                   value={draftSlotCount}
                   onChange={(event) => setDraftSlotCount(event.target.value)}
-                  className="w-full rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full rounded-md border border-slate-300 bg-white/80 px-3 py-2 text-slate-600 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </label>
             </div>
@@ -1330,7 +1435,7 @@ function Dashboard() {
               <button
                 type="button"
                 onClick={applySlotSettings}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+                className="rounded-md bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
               >
                 Apply
               </button>
@@ -1345,7 +1450,7 @@ function Dashboard() {
           onClick={closeDeleteModal}
         >
           <div
-            className="w-full max-w-md scale-100 rounded-2xl border border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-md transition-all duration-200 sm:p-6"
+            className="w-full max-w-md scale-100 rounded-2xl border border-white/30 bg-white/80 p-5 shadow-2xl backdrop-blur-xl transition-all duration-200 sm:p-6"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start gap-3">
@@ -1353,7 +1458,7 @@ function Dashboard() {
                 <TriangleAlert size={22} />
               </span>
               <div>
-                <h3 className="text-lg font-semibold text-slate-800">Are you sure you want to delete this record?</h3>
+                <h3 className="text-lg font-semibold text-slate-900">Are you sure you want to delete this record?</h3>
                 <p className="mt-1 text-sm text-slate-600">This action cannot be undone.</p>
               </div>
             </div>
@@ -1371,9 +1476,50 @@ function Dashboard() {
                 type="button"
                 onClick={handleDeleteRow}
                 disabled={isDeletingRow}
-                className="rounded-md bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md bg-red-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isDeletingRow ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showCancelTimerModal ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 px-4 backdrop-blur-md transition-opacity duration-200"
+          onClick={closeCancelTimerModal}
+        >
+          <div
+            className="w-full max-w-md scale-100 rounded-2xl border border-white/30 bg-white/80 p-5 shadow-2xl backdrop-blur-xl transition-all duration-200 sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-full bg-orange-500/20 text-orange-600">
+                <TimerOff size={22} />
+              </span>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Stop Timer?</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Are you sure you want to cancel the active timer? Your progress for this slot will be lost.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeCancelTimerModal}
+                className="rounded-md border border-slate-300 bg-white/60 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
+              >
+                Keep Running
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelTimer}
+                className="rounded-md bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600"
+              >
+                Stop Timer
               </button>
             </div>
           </div>

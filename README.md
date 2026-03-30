@@ -1,32 +1,48 @@
-# EffortGrid - Daily Log (MERN)
+# EffortGrid
 
-A full MERN application implementing the Daily Log table from the sketch with:
+EffortGrid is a full-stack productivity app for daily effort tracking. It combines:
 
-- Exact heading: **Welcome to Daily Log**
-- Dynamic time-slot columns
-- Editable dates
-- Red `[+]` row insertion button with +1 day auto-date logic
-- `click here change slots` control for interval configuration
-- MongoDB persistence with Save/Load
+- Time tracking with slot-based logging and timer controls
+- Todo list management
+- Dashboard insights with growth chart
+- User authentication
+
+## Tech Stack
+
+- Frontend: React, Vite, Tailwind CSS, Recharts, React Router
+- Backend: Node.js, Express, MongoDB (Mongoose), JWT auth
 
 ## Project Structure
 
-- `client/` React + Vite + Tailwind frontend
-- `server/` Express + MongoDB backend
+- `client/` Frontend application
+- `server/` Backend API
 
-## 1) Configure Environment
+## Prerequisites
 
-1. Copy `server/.env.example` to `server/.env`
-2. Set `MONGODB_URI` in `server/.env`
+- Node.js 18+ recommended
+- npm 9+ recommended
+- MongoDB connection string
 
-Example:
+## Environment Setup
 
-```
+1. Copy `server/.env.example` to `server/.env`.
+2. Set the values for your environment.
+
+Example `server/.env`:
+
+```env
 PORT=5000
-MONGODB_URI=mongodb://127.0.0.1:27017/effort-grid
+MONGO_URI=mongodb+srv://<username>:<password>@<cluster>/<database>?retryWrites=true&w=majority
+JWT_SECRET=replace-with-a-strong-random-secret
+CORS_ORIGINS=http://localhost:5173
 ```
 
-## 2) Install Dependencies
+Notes:
+
+- Backend accepts either `MONGO_URI` or `MONGODB_URI`.
+- If `JWT_SECRET` is missing, server uses a temporary dev secret and logs a warning.
+
+## Installation
 
 From repository root:
 
@@ -35,7 +51,7 @@ npm install
 npm run install:all
 ```
 
-## 3) Run in Development
+## Run in Development
 
 From repository root:
 
@@ -43,23 +59,66 @@ From repository root:
 npm run dev
 ```
 
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:5000`
+This starts both apps concurrently:
 
-## 4) Build
+- Client: `http://localhost:5173`
+- Server: `http://localhost:5000`
+
+## Build and Start
+
+Build client:
 
 ```bash
 npm run build
 ```
 
-## API Endpoints
+Start server (production mode):
 
-- `GET /api/daily-log` -> Load current table structure and rows
-- `POST /api/daily-log/save` -> Save full table structure and rows
+```bash
+npm run start
+```
 
-## Default Seeded Rows
+## Available Root Scripts
 
-When DB has no data yet, backend initializes:
+- `npm run install:all` Install client and server dependencies
+- `npm run dev` Run server and client together
+- `npm run build` Build client
+- `npm run start` Start server
 
-- `2026/3/27`
-- `2026/3/28`
+## API Overview
+
+Health:
+
+- `GET /api/health`
+
+Auth:
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+
+Daily log:
+
+- `GET /api/daily-log`
+- `POST /api/daily-log/save`
+- `DELETE /api/daily-log/row`
+
+Protected logs:
+
+- `GET /api/logs`
+- `POST /api/logs`
+- `DELETE /api/logs/:id`
+
+## Key Features
+
+- Glassmorphism-based responsive UI
+- Home, Time Tracking, and Todo views
+- Slot interval grouping based on 15-minute base units
+- Timer mode and manual tick support
+- Auto-save behavior with subtle saved indicator
+- Daily effort trend chart
+
+## Troubleshooting
+
+- If CORS errors occur, update `CORS_ORIGINS` in `server/.env`.
+- If DB connection fails, verify `MONGO_URI` and network access for your MongoDB cluster.
+- If login token errors occur, verify `JWT_SECRET` is set and restart server.
